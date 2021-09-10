@@ -22,7 +22,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	appsv1 "k8s.io/api/apps/v1"
 
 	cachev1alpha1 "github.com/sosoriov/memcached-operator/api/v1alpha1"
 )
@@ -58,5 +61,7 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 func (r *MemcachedReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cachev1alpha1.Memcached{}).
+		Owns(&appsv1.Deployment{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 2}).
 		Complete(r)
 }
