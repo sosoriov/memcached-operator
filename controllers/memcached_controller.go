@@ -19,13 +19,19 @@ package controllers
 import (
 	"context"
 
+	corev1 "k8s.io/api/core/v1"
+
+	"k8s.io/apimachinery/pkg/api/errors"
+
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	cachev1alpha1 "github.com/sosoriov/memcached-operator/api/v1alpha1"
 )
@@ -61,7 +67,66 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	memcachedDeployment := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: memcached.Name, Namespace: memcached.Namespace}, memcachedDeployment)
+	if err != nil && errors.IsNotFound(err) {
+		// Create a new deployment
+		dep := r.deploymentForMemcached(memcached)
+		log.Info("Creating a new deployment for Memcached", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+		err = r.Create(ctx, dep)
+		if err != nil {
+			log.Error(err, "Error creating a new deployment for Memcached", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+			return ctrl.Result{}, err
+		}
+
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	log.Info("Deployment ...", "Deployment Name:", memcachedDeployment.GetName())
+
 	return ctrl.Result{}, nil
+}
+
+func (r *MemcachedReconciler) deploymentForMemcached(m *cachev1alpha1.Memcached) *appsv1.Deployment {
+	replicas := m.Spec.Size
+	ls := labelsForMemcached(m.Name)
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      m.Name,
+			Namespace: m.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: ls,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: ls,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Image:   "memcached:1.4.36-alpine",
+						Name:    "memcached",
+						Command: []string{"memcached", "-m=64", "-o", "modern", "-v"},
+						Ports: []corev1.ContainerPort{{
+							ContainerPort: 11211,
+							Name:          "memcached",
+						}},
+					}},
+				},
+			},
+		},
+	}
+
+	// Set Memcached instance as the owner and controller
+	ctrl.SetControllerReference(m, dep, r.Scheme)
+	return dep
+
+}
+
+func labelsForMemcached(name string) map[string]string {
+	return map[string]string{"app": "memcached", "memcached_cr": name}
 }
 
 // SetupWithManager sets up the controller with the Manager.
