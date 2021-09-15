@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -80,6 +81,24 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 
 		return ctrl.Result{Requeue: true}, nil
+	} else if err != nil {
+		log.Error(err, "Failed to get Deployment")
+		return ctrl.Result{}, err
+	}
+
+	// Ensure the deployment size is the same as the spec:
+	size := memcached.Spec.Size
+	if *memcachedDeployment.Spec.Replicas != size {
+		memcachedDeployment.Spec.Replicas = &size
+		err = r.Update(ctx, memcachedDeployment)
+		if err != nil {
+			log.Error(err, "Error updating number of replicas", "Deployment.Namespace", memcachedDeployment.Namespace, "Deployment.Name", memcachedDeployment.Name)
+			return ctrl.Result{}, err
+		}
+
+		log.Info("Replicas have been syncronized!!!!!!")
+
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	log.Info("Deployment ...", "Deployment Name:", memcachedDeployment.GetName())
