@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -101,9 +102,39 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
+	podList := &corev1.PodList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(memcached.Namespace),
+		client.MatchingLabels(labelsForMemcached(memcached.Name)),
+	}
+	if err = r.List(ctx, podList, listOpts...); err != nil {
+		log.Error(err, "Failed to list pods", "Memcached.Namespace", memcached.Namespace, "Memcached.Name", memcached.Name)
+		return ctrl.Result{}, err
+	}
+
+	podNames := getPodNames(podList.Items)
+
+	// update Status.Nodes if needed
+	if !reflect.DeepEqual(podNames, memcached.Status.Nodes) {
+		memcached.Status.Nodes = podNames
+		err := r.Status().Update(ctx, memcached)
+		if err != nil {
+			log.Error(err, "Failed to update Memcached status")
+		}
+	}
+
 	log.Info("Deployment ...", "Deployment Name:", memcachedDeployment.GetName())
 
 	return ctrl.Result{}, nil
+}
+
+func getPodNames(pods []corev1.Pod) []string {
+	var podNames []string
+	for _, pod := range pods {
+		podNames = append(podNames, pod.Name)
+	}
+
+	return podNames
 }
 
 func (r *MemcachedReconciler) deploymentForMemcached(m *cachev1alpha1.Memcached) *appsv1.Deployment {
